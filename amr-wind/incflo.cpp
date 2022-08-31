@@ -23,6 +23,8 @@ incflo::incflo()
     // constructor. No valid BoxArray and DistributionMapping have been defined.
     // But the arrays for them have been resized.
 
+  std::cout << std::endl << std::endl << " I AM INITIALIZING "<< std::endl << std::endl;
+
     m_time.parse_parameters();
     // Read inputs file using ParmParse
     ReadParameters();
@@ -301,6 +303,62 @@ void incflo::Evolve()
     if (m_time.write_last_checkpoint()) {
         m_sim.io_manager().write_checkpoint_file();
     }
+}
+
+/** Perform time-integration with multiblock coupled with ERF
+ */
+void incflo::Evolve_MB(int MBstep, int max_block_step)
+{
+    BL_PROFILE("amr-wind::incflo::Evolve()");
+
+    int step = 0;
+
+    amrex::Print() << "\n======================================================"
+      "========================\n";
+    amrex::Print() << "AMR_WIND STEP" << std::endl;
+    while (m_time.new_timestep() && step < max_block_step) {
+        step+=1;
+        amrex::Real time0 = amrex::ParallelDescriptor::second();
+
+        regrid_and_update();
+
+        pre_advance_stage1();
+        pre_advance_stage2();
+
+        amrex::Real time1 = amrex::ParallelDescriptor::second();
+        // Advance to time t + dt
+        advance();
+        amrex::Print() << std::endl;
+        amrex::Real time2 = amrex::ParallelDescriptor::second();
+        post_advance_work();
+        amrex::Real time3 = amrex::ParallelDescriptor::second();
+
+        amrex::Print() << "WallClockTime: " << m_time.time_index()
+                       << " Pre: " << std::setprecision(3) << (time1 - time0)
+                       << " Solve: " << std::setprecision(4) << (time2 - time1)
+                       << " Post: " << std::setprecision(3) << (time3 - time2)
+                       << " Total: " << std::setprecision(4) << (time3 - time0)
+                       << std::endl;
+
+        amrex::Print() << "Solve time per cell: " << std::setprecision(4)
+                       << amrex::ParallelDescriptor::NProcs() *
+                              (time2 - time1) /
+                              static_cast<amrex::Real>(m_cell_count)
+                       << std::endl;
+    }
+    amrex::Print() << "\n======================================================"
+                      "========================\n"
+                   << std::endl;
+
+    // Output at final time
+    /*
+    if (m_time.write_last_plot_file()) {
+        m_sim.io_manager().write_plot_file();
+    }
+    if (m_time.write_last_checkpoint()) {
+        m_sim.io_manager().write_checkpoint_file();
+    }
+    */
 }
 
 // Make a new level from scratch using provided BoxArray and
