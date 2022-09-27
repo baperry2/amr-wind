@@ -23,7 +23,7 @@ incflo::incflo()
     // constructor. No valid BoxArray and DistributionMapping have been defined.
     // But the arrays for them have been resized.
 
-  std::cout << std::endl << std::endl << " I AM INITIALIZING "<< std::endl << std::endl;
+    std::cout << std::endl << std::endl << " AMR-WIND IS INITIALIZING "<< std::endl << std::endl;
 
     m_time.parse_parameters();
     // Read inputs file using ParmParse
@@ -316,7 +316,8 @@ void incflo::Evolve_MB(int MBstep, int max_block_step)
     amrex::Print() << "\n======================================================"
       "========================\n";
     amrex::Print() << "AMR_WIND STEP" << std::endl;
-    while (m_time.new_timestep() && step < max_block_step) {
+    while (step < max_block_step) {
+        m_time.new_timestep();
         step+=1;
         amrex::Real time0 = amrex::ParallelDescriptor::second();
 

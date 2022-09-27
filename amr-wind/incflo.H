@@ -12,6 +12,9 @@
 #include "amr-wind/core/SimTime.H"
 #include "amr-wind/core/FieldRepo.H"
 
+#ifdef ERF_USE_MULTIBLOCK
+  class MultiBlockContainer;
+#endif
 namespace amr_wind {
 namespace pde {
 class PDEBase;
@@ -148,6 +151,10 @@ public:
     void init_physics_and_pde();
 
     void ReadCheckpointFile();
+
+#ifdef ERF_USE_MULTIBLOCK
+  void SetMultiBlockPointer(MultiBlockContainer *mbc) { m_sim.set_mbc(mbc); }
+#endif
 
 private:
     //
