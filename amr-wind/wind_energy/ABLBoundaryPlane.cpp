@@ -466,11 +466,10 @@ void ABLBoundaryPlane::read_erf()
       amrex::BoxArray ba(domain);
       amrex::DistributionMapping dm{ba};
 
-      amrex::BndryRegister bndry1(
-                                  ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
-      amrex::BndryRegister bndry2(
-                                  ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
+      std::cout << " BOX ARRAY " << ba << std::endl << " DM " << dm << std::endl ;
 
+      amrex::BndryRegister bndry1(ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
+      amrex::BndryRegister bndry2(ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
       
       if (field.name() == "velocity") {
         bndry1.setVal(1.0e13); // 1.0e13
@@ -478,7 +477,7 @@ void ABLBoundaryPlane::read_erf()
       } else if (field.name() == "temperature") {
         bndry1.setVal(1.0e13); // 1.0e13
         bndry2.setVal(1.0e13); // 1.0e13
-        }
+      }
 
       for (amrex::OrientationIter oit; oit != nullptr; ++oit) {
         auto ori = oit();
@@ -486,23 +485,24 @@ void ABLBoundaryPlane::read_erf()
             (field.bc_type()[ori] != BC::mass_inflow)) {
           //continue;
         }
-        std::cout << ori << " HRE" << std::endl;
-        if (field.bc_type()[ori] == BC::mass_inflow and time > 0.0 and field.name() == "temperature") {
-          std::cout << ori << " A " << std::endl;
-          mbc()->SetBoxLists();
-          mbc()->CopyToBoundaryRegister(bndry1, bndry2, ori);
-        } else if (field.name() == "temperature") {
-          std::cout << ori << " B " << std::endl;        
-          bndry1[ori].setVal(300.0);
-          bndry2[ori].setVal(300.0);
-        } else if (field.name() == "velocity") {
-          std::cout << ori << " C " << std::endl;
-          bndry1[ori].setVal(10.0, 0, 1);
-          bndry2[ori].setVal(10.0, 0, 1);
-          bndry1[ori].setVal(0.0, 1, 1);
-          bndry2[ori].setVal(0.0, 1, 1);
-          bndry1[ori].setVal(0.0, 2, 1);
-          bndry2[ori].setVal(0.0, 2, 1);
+        if (field.bc_type()[ori] == BC::mass_inflow and time > 0.0) {
+          if ( field.name() == "temperature") {
+            mbc()->CopyToBoundaryRegister(bndry1, bndry2, ori);
+          } else if ( field.name() == "velocity") {
+            // mbc()->CopyToBoundaryRegister(bndry1, bndry2, ori);
+          }
+        } else {
+          if (field.name() == "temperature") {
+            bndry1[ori].setVal(300.0);
+            bndry2[ori].setVal(300.0);
+          } else if (field.name() == "velocity") {
+            bndry1[ori].setVal(10.0, 0, 1);
+            bndry2[ori].setVal(10.0, 0, 1);
+            bndry1[ori].setVal( 0.0, 1, 1);
+            bndry2[ori].setVal( 0.0, 1, 1);
+            bndry1[ori].setVal( 0.0, 2, 1);
+            bndry2[ori].setVal( 0.0, 2, 1);
+          }
         }
         /*
         amrex::IntVect nghost(0);
