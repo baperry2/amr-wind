@@ -14,7 +14,7 @@ namespace {
 AMREX_FORCE_INLINE int
 closest_index(const amrex::Vector<amrex::Real>& vec, const amrex::Real value)
 {
-    auto const it = std::upper_bound(vec.begin(), vec.end(), value);
+    auto const it = std::lower_bound(vec.begin(), vec.end(), value);
     AMREX_ALWAYS_ASSERT(it != vec.end());
 
     const int idx = std::distance(vec.begin(), it);
@@ -450,7 +450,6 @@ void ABLBoundaryPlane::read_erf()
 
     // Get current ERF time values
     mbc()->PopulateErfTimesteps(m_in_times.data());
-    m_in_times[1] += 1e-12; // lets case where time = m_in_times[1] be valid
     AMREX_ALWAYS_ASSERT((m_in_times[0]<= time) && (time <= m_in_times[1]));
     const int index = 0;
     const int lev = 0;
@@ -465,8 +464,6 @@ void ABLBoundaryPlane::read_erf()
       amrex::Box domain = geom[lev].Domain();
       amrex::BoxArray ba(domain);
       amrex::DistributionMapping dm{ba};
-
-      std::cout << " BOX ARRAY " << ba << std::endl << " DM " << dm << std::endl ;
 
       amrex::BndryRegister bndry1(ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
       amrex::BndryRegister bndry2(ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
@@ -485,12 +482,16 @@ void ABLBoundaryPlane::read_erf()
             (field.bc_type()[ori] != BC::mass_inflow)) {
           //continue;
         }
-        if (field.bc_type()[ori] == BC::mass_inflow and time > 0.0) {
+        if (field.bc_type()[ori] == BC::mass_inflow and time >= 0.0 and field.name() == "temperature") {
+          amrex::Print() << "COPY ERF TO AMRWIND ... " << std::endl;
+          mbc()->CopyERFtoAMRWindBoundaryReg(bndry1, ori, m_in_times[0], field.name());
+          mbc()->CopyERFtoAMRWindBoundaryReg(bndry2, ori, m_in_times[1], field.name());
+          /*
           if ( field.name() == "temperature") {
-            mbc()->CopyToBoundaryRegister(bndry1, bndry2, ori);
+            mbc()->CopyToBoundaryRegister(bndry1, ori);
           } else if ( field.name() == "velocity") {
             // mbc()->CopyToBoundaryRegister(bndry1, bndry2, ori);
-          }
+            } */
         } else {
           if (field.name() == "temperature") {
             bndry1[ori].setVal(300.0);
