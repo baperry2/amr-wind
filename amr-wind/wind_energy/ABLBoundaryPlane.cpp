@@ -14,7 +14,7 @@ namespace {
 AMREX_FORCE_INLINE int
 closest_index(const amrex::Vector<amrex::Real>& vec, const amrex::Real value)
 {
-    auto const it = std::upper_bound(vec.begin(), vec.end(), value);
+  auto const it = std::lower_bound(vec.begin(), vec.end(), value);
     AMREX_ALWAYS_ASSERT(it != vec.end());
 
     const int idx = static_cast<int>(std::distance(vec.begin(), it));
@@ -258,6 +258,9 @@ bool InletData::is_populated(amrex::Orientation ori) const
 ABLBoundaryPlane::ABLBoundaryPlane(CFDSim& sim)
     : m_time(sim.time()), m_repo(sim.repo()), m_mesh(sim.mesh())
 {
+#ifdef ERF_USE_MULTIBLOCK
+    m_mbc = sim.mbc();
+#endif
     amrex::ParmParse pp("ABL");
     int pp_io_mode = -1;
     pp.query("bndry_io_mode", pp_io_mode);
@@ -293,7 +296,7 @@ ABLBoundaryPlane::ABLBoundaryPlane(CFDSim& sim)
     }
 #endif
 
-    if (!(m_out_fmt == "native" || m_out_fmt == "netcdf")) {
+    if (!(m_out_fmt == "native" || m_out_fmt == "netcdf" || m_out_fmt == "erf-multiblock")) {
         amrex::Print() << "Warning: boundary output format not recognized, "
                           "changing to native format"
                        << std::endl;
@@ -347,6 +350,9 @@ void ABLBoundaryPlane::initialize_data()
             amrex::Abort(
                 "ABLBoundaryPlane: invalid variable requested: " + fname);
         }
+    }
+    if (m_io_mode == io_mode::output and m_out_fmt == "erf-multiblock") {
+        amrex::Abort("ABLBoundaryPlane: can't output data in erf-multiblock mode");
     }
 }
 
@@ -746,8 +752,130 @@ void ABLBoundaryPlane::read_header()
             const amrex::Box pbx(plo, phi);
             m_in_data.define_level_data(ori, pbx, nc);
         }
+    } else if (m_out_fmt == "erf-multiblock") {
+
+        m_in_times.push_back(-1.0e13); // create space for storing time at erf old and new timestep
+        m_in_times.push_back(-1.0e13);
+        int nc = 0;
+        for (auto* fld : m_fields) {
+            m_in_data.component(static_cast<int>(fld->id())) = nc;
+            nc += fld->num_comp();
+        }
+
+        // FIXME: need to generalize to lev > 0 somehow
+        const int lev = 0;
+        for (amrex::OrientationIter oit; oit != nullptr; ++oit) {
+            auto ori = oit();
+            // FIXME: would be safer and less storage to not allocate all of
+            // these but we do not use m_planes for input and need to detect
+            // mass inflow from field bcs same for define level data below
+            m_in_data.define_plane(ori);
+            const amrex::Box& minBox = m_mesh.boxArray(lev).minimalBox();
+            amrex::IntVect plo(minBox.loVect());
+            amrex::IntVect phi(minBox.hiVect());
+            const int normal = ori.coordDir();
+            plo[normal] = ori.isHigh() ? minBox.hiVect()[normal] + 1 : -1;
+            phi[normal] = ori.isHigh() ? minBox.hiVect()[normal] + 1 : -1;
+            const amrex::Box pbx(plo, phi);
+            m_in_data.define_level_data(ori, pbx, nc);
+        }
     }
 }
+
+#ifdef ERF_USE_MULTIBLOCK
+void ABLBoundaryPlane::read_erf()
+{
+    amrex::Real time = m_time.new_time();
+    AMREX_ALWAYS_ASSERT(m_in_times[0] <= time); // Can't go back in time for ERF data
+    // return early if current erf data can still be interpolated in time
+    if ((m_in_data.tn() <= time) && (time < m_in_data.tnp1())) {
+        m_in_data.interpolate(time);
+        return;
+    }
+
+    // Get current ERF time values
+    // mbc()->PopulateErfTimesteps(m_in_times.data());
+    AMREX_ALWAYS_ASSERT((m_in_times[0]<= time) && (time <= m_in_times[1]));
+    const int index = 0;
+    const int lev = 0;
+    // FIXME FIXME TODO DELETE
+    mbc()->SetBoxLists();
+
+    for (auto* fld : m_fields) {
+
+      auto& field = *fld;
+      const auto& geom = field.repo().mesh().Geom();
+
+      amrex::Box domain = geom[lev].Domain();
+      amrex::BoxArray ba(domain);
+      amrex::DistributionMapping dm{ba};
+
+      amrex::BndryRegister bndry1(ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
+      amrex::BndryRegister bndry2(ba, dm, m_in_rad, m_out_rad, m_extent_rad, field.num_comp());
+
+      if (field.name() == "velocity") {
+        bndry1.setVal(1.0e13); // 1.0e13
+        bndry2.setVal(1.0e13); // 1.0e13
+      } else if (field.name() == "temperature") {
+        bndry1.setVal(1.0e13); // 1.0e13
+        bndry2.setVal(1.0e13); // 1.0e13
+      }
+
+      for (amrex::OrientationIter oit; oit != nullptr; ++oit) {
+        auto ori = oit();
+        if ((!m_in_data.is_populated(ori)) ||
+            (field.bc_type()[ori] != BC::mass_inflow)) {
+          //continue;
+        }
+        if (field.bc_type()[ori] == BC::mass_inflow and time >= 0.0) {
+          amrex::Print() << "COPY ERF TO AMRWIND ... " << std::endl;
+          // EXTRA FIXME
+          // mbc()->CopyERFtoAMRWindBoundaryReg(bndry1, ori, m_in_times[0], field.name());
+          // mbc()->CopyERFtoAMRWindBoundaryReg(bndry2, ori, m_in_times[1], field.name());
+          /*
+          if ( field.name() == "temperature") {
+            mbc()->CopyToBoundaryRegister(bndry1, ori);
+          } else if ( field.name() == "velocity") {
+            // mbc()->CopyToBoundaryRegister(bndry1, bndry2, ori);
+            } */
+        } else {
+          if (field.name() == "temperature") {
+            bndry1[ori].setVal(300.0);
+            bndry2[ori].setVal(300.0);
+          } else if (field.name() == "velocity") {
+            bndry1[ori].setVal(10.0, 0, 1);
+            bndry2[ori].setVal(10.0, 0, 1);
+            bndry1[ori].setVal( 0.0, 1, 1);
+            bndry2[ori].setVal( 0.0, 1, 1);
+            bndry1[ori].setVal( 0.0, 2, 1);
+            bndry2[ori].setVal( 0.0, 2, 1);
+          }
+        }
+        /*
+        amrex::IntVect nghost(0);
+        amrex::NonLocalBC::MultiBlockCommMetaData *cmd_full_tmp =
+          new amrex::NonLocalBC::MultiBlockCommMetaData(bndry1[ori].multiFab(), domain,
+                                                        bndry2[ori].multiFab(), nghost, mbc()->dtos_etoa);
+        */
+
+        //std::cout << ori << " after break " << std::endl;
+
+        //std::cout << "BNDRY REG " << field.name() << " " << ori << " " << std::endl;
+        /*
+          std::string facename1 =
+          amrex::Concatenate(filename1 + '_', ori, 1);
+          std::string facename2 =
+          amrex::Concatenate(filename2 + '_', ori, 1);
+          bndry1[ori].read(facename1);
+          bndry2[ori].read(facename2);
+        */
+        m_in_data.read_data_native(oit, bndry1, bndry2, lev, fld, time, m_in_times);
+
+      }
+    }
+    m_in_data.interpolate(time);
+}
+#endif
 
 void ABLBoundaryPlane::read_file()
 {
@@ -756,6 +884,13 @@ void ABLBoundaryPlane::read_file()
         return;
     }
 
+#ifdef ERF_USE_MULTIBLOCK
+    if (m_out_fmt == "erf-multiblock") {
+      read_erf();
+      return;
+    }
+#endif
+    
     // populate planes and interpolate
     const amrex::Real time = m_time.new_time();
     AMREX_ALWAYS_ASSERT((m_in_times[0] <= time) && (time < m_in_times.back()));

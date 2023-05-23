@@ -11,6 +11,17 @@ ABLFieldInit::ABLFieldInit()
 {
     amrex::ParmParse pp_abl("ABL");
 
+    // ABL-with-bubble
+    pp_abl.query("use_bubble", m_use_bubble);
+    if (m_use_bubble) {
+      amrex::Print() << "Initializing with bubble" << std::endl;
+      pp_abl.getarr("bubble_loc", m_bubble_loc);
+      pp_abl.query("bubble_radius", m_bubble_radius);
+      pp_abl.query("bubble_temp_ratio", m_bubble_temp_ratio);
+    } else {
+      amrex::Print() << "Not initializing with bubble" << std::endl;
+    }
+
     // Temperature variation as a function of height
     pp_abl.getarr("temperature_heights", m_theta_heights);
     pp_abl.getarr("temperature_values", m_theta_values);
@@ -110,6 +121,10 @@ void ABLFieldInit::operator()(
     const amrex::Real* th = m_thht_d.data();
     const amrex::Real* tv = m_thvv_d.data();
 
+    const amrex::Real bcx = m_bubble_loc[0];
+    const amrex::Real bcy = m_bubble_loc[1];
+    const amrex::Real bcz = m_bubble_loc[2];
+
     amrex::ParallelFor(vbx, [=] AMREX_GPU_DEVICE(int i, int j, int k) noexcept {
         const amrex::Real x = problo[0] + (i + 0.5) * dx[0];
         const amrex::Real y = problo[1] + (j + 0.5) * dx[1];
@@ -130,7 +145,12 @@ void ABLFieldInit::operator()(
             }
         }
 
-        temperature(i, j, k, 0) += theta;
+        amrex::Real ratio = 1.0;
+        if (m_use_bubble) {
+          amrex::Real radius = std::sqrt((x-bcx)*(x-bcx) + (y-bcy)*(y-bcy) + (z-bcz)*(z-bcz));
+          ratio = 1.0 + (m_bubble_temp_ratio - 1.0) * exp(-0.5 * radius* radius / (m_bubble_radius * m_bubble_radius));
+        }
+        temperature(i, j, k, 0) += theta * ratio;
 
         if (linear_profile) {
             velocity(i, j, k, 0) =
