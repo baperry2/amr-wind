@@ -6,6 +6,9 @@
 #include "AMReX_Gpu.H"
 #include "amr-wind/utilities/ncutils/nc_interface.H"
 #include <AMReX_BndryRegister.H>
+#ifdef ERF_USE_MULTIBLOCK
+#include "MultiBlockContainer.H"
+#endif
 
 namespace amr_wind {
 
@@ -130,6 +133,8 @@ public:
 
     void read_file();
 
+    void read_erf();
+
     void populate_data(
         const int /*lev*/,
         const amrex::Real /*time*/,
@@ -156,10 +161,18 @@ public:
         const int /*lev*/,
         const amrex::Orientation /*ori*/) const;
 
+    MultiBlockContainer* mbc() {return *m_mbc;}
+
 private:
     const amr_wind::SimTime& m_time;
     const FieldRepo& m_repo;
     const amrex::AmrCore& m_mesh;
+
+    // pointer to pointer : when ABL boundary plane gets intiialized, amr-wind
+    // CFDsim does not yet have the up to date pointer to the mbc
+    // be careful: if this is used before amr-wind gets the mbc pointer set
+    // bad things will happen
+    MultiBlockContainer** m_mbc;
 
 #ifdef AMR_WIND_USE_NETCDF
     void write_data(
